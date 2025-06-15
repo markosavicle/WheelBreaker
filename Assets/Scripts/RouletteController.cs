@@ -3,149 +3,143 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections;
 
 public class RouletteController : MonoBehaviour
 {
-    private struct Bet
+    private class Bet
     {
         public BetZone.BetType type;
-        public int multiplier;
+        public int payoutMultiplier;
+        public int amount; // chips placed
+
+        public Bet(BetZone.BetType t, int p) { type = t; payoutMultiplier = p; amount = 0; }
     }
-    private List<Bet> activeBets = new List<Bet>();
 
     [Header("Refs")]
     public Button spinButton;
     public TextMeshProUGUI spinButtonLabel;
     public TextMeshProUGUI resultText;
     public WheelSpinner wheel;
+    public UIManager ui;
 
-    private GameManager gm;
-    private UIManager ui;
-
-    private int landedNumber;
-    private string landedColor;
+    private List<Bet> bets = new List<Bet>();
+    private System.Random rng = new System.Random();
 
     void Start()
     {
-        gm = GameManager.Instance;
-        ui = FindFirstObjectByType<UIManager>();
-
-        resultText.text = "Place your bet!";
-        spinButtonLabel.text = "Bet & Spin";
         spinButton.onClick.AddListener(OnSpinPressed);
-
-        ui.UpdateUI();
-        // initialize bets display empty
-        ui.UpdateBetUI(new List<BetZone.BetType>(), new List<int>());
+        ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
+        ui.ClearBetsDisplay();
     }
 
-    /// <summary>
-    /// Called by BetZone when a bet button is clicked.
-    /// </summary>
     public void PlaceBet(BetZone.BetType type, int multiplier)
     {
-        activeBets.Add(new Bet { type = type, multiplier = multiplier });
-        // update with parallel lists
-        var types = new List<BetZone.BetType>();
-        var mults = new List<int>();
-        foreach (var b in activeBets)
+        if (!GameManager.Instance.SpendChip())
         {
-            types.Add(b.type);
-            mults.Add(b.multiplier);
+            ui.DisplayResult("No chips left!");
+            return;
         }
-        ui.UpdateBetUI(types, mults);
+
+        // find or create the Bet entry
+        var bet = bets.Find(b => b.type == type && b.payoutMultiplier == multiplier);
+        if (bet == null)
+        {
+            bet = new Bet(type, multiplier);
+            bets.Add(bet);
+        }
+        bet.amount++;
+
+        // refresh UI
+        ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
+        ui.UpdateBetUI(
+            bets.ConvertAll(b => b.type),
+            bets.ConvertAll(b => b.amount),
+            bets.ConvertAll(b => b.payoutMultiplier)
+        );
     }
 
     void OnSpinPressed()
     {
-        if (activeBets.Count == 0)
+        if (bets.Count == 0)
         {
-            resultText.text = "Place a bet first!";
+            ui.DisplayResult("Place a bet first!");
             return;
         }
 
-        if (!gm.SpendChip())
-        {
-            resultText.text = "No chips left!";
-            return;
-        }
-
-        ui.UpdateUI();
         spinButton.interactable = false;
         resultText.text = "Spinning…";
 
-        landedNumber = Random.Range(0, 37);
-        landedColor = (landedNumber == 0) ? "Green"
-                       : (landedNumber % 2 == 0) ? "Black"
-                       : "Red";
+        int result = rng.Next(0, 37);
+        string color = GetColor(result);
+        string oddEven = result == 0 ? "Zero" : (result % 2 == 0 ? "Even" : "Odd");
 
-        wheel.SpinToSlot(landedNumber);
-        Invoke(nameof(ShowResult), wheel.spinDuration);
+        wheel.SpinToSlot(result);
+        StartCoroutine(DelayedShowResult(result, color, oddEven));
     }
 
-    void ShowResult()
+    IEnumerator DelayedShowResult(int number, string color, string oddEven)
+    {
+        yield return new WaitForSeconds(wheel.spinDuration);
+        ShowResult(number, color, oddEven);
+    }
+
+    void ShowResult(int number, string color, string oddEven)
     {
         int totalScoreGain = 0;
-        bool anyWin = false;
 
-        foreach (var bet in activeBets)
+        foreach (var bet in bets)
         {
-            if (EvaluateBet(bet.type, landedNumber, landedColor))
+            if (EvaluateBet(bet.type, number, color))
             {
-                anyWin = true;
-                int gain = bet.multiplier * gm.chipValue;
+                int gain = bet.amount * bet.payoutMultiplier * GameManager.Instance.chipValue;
                 totalScoreGain += gain;
-                gm.AwardScore(bet.multiplier);
             }
         }
 
-        resultText.text = anyWin
+        if (totalScoreGain > 0)
+            GameManager.Instance.AwardScore(totalScoreGain);
+
+        string header = $"{number} {color} {oddEven}".Trim();
+        string body = totalScoreGain > 0
             ? $"You won {totalScoreGain} score!"
             : "No winning bets.";
 
-        // clear bets and update UI
-        activeBets.Clear();
-        ui.UpdateUI();
-        ui.UpdateBetUI(new List<BetZone.BetType>(), new List<int>());
+        ui.DisplayResult($"{header}\n{body}");
 
-        spinButtonLabel.text = "Bet & Spin";
+        // clear bets
+        bets.Clear();
+        ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
+        ui.ClearBetsDisplay();
         spinButton.interactable = true;
     }
 
     private bool EvaluateBet(BetZone.BetType type, int number, string color)
     {
-        if (number < 0 || number > 36) return false;
-
-        int enumValue = (int)type;
-        if (enumValue >= 0 && enumValue <= 36)
-            return enumValue == number;
-
+        int val = (int)type;
+        if (val >= 0 && val <= 36) return val == number;
         switch (type)
         {
-            // colors
-            case BetZone.BetType.Bet_Red: return color == "Red";
+            case BetZone.BetType.Bet_Red:   return color == "Red";
             case BetZone.BetType.Bet_Black: return color == "Black";
-
-            // even/odd
-            case BetZone.BetType.Bet_Even: return number != 0 && number % 2 == 0;
-            case BetZone.BetType.Bet_Odd: return number % 2 == 1;
-
-            // dozens
+            case BetZone.BetType.Bet_Even:  return number != 0 && number % 2 == 0;
+            case BetZone.BetType.Bet_Odd:   return number % 2 == 1;
             case BetZone.BetType.Bet_1st12: return number >= 1 && number <= 12;
             case BetZone.BetType.Bet_2st12: return number >= 13 && number <= 24;
             case BetZone.BetType.Bet_3st12: return number >= 25 && number <= 36;
-
-            // columns
-            case BetZone.BetType.Bet_1_34: return (number - 1) % 3 == 0;
-            case BetZone.BetType.Bet_2_35: return (number - 2) % 3 == 0;
-            case BetZone.BetType.Bet_3_36: return (number - 3) % 3 == 0;
-
-            // high/low
-            case BetZone.BetType.Bet_1_18: return number >= 1 && number <= 18;
+            case BetZone.BetType.Bet_1_34:  return (number - 1) % 3 == 0;
+            case BetZone.BetType.Bet_2_35:  return (number - 2) % 3 == 0;
+            case BetZone.BetType.Bet_3_36:  return (number - 3) % 3 == 0;
+            case BetZone.BetType.Bet_1_18:  return number >= 1 && number <= 18;
             case BetZone.BetType.Bet_19_36: return number >= 19 && number <= 36;
-
-            default:
-                return false;
+            default: return false;
         }
+    }
+
+    private string GetColor(int number)
+    {
+        if (number == 0) return "Green";
+        int[] reds = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36};
+        return System.Array.IndexOf(reds, number) >= 0 ? "Red" : "Black";
     }
 }

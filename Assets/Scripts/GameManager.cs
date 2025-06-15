@@ -1,3 +1,4 @@
+// GameManager.cs
 using UnityEngine;
 
 public class GameManager : MonoBehaviour
@@ -6,7 +7,7 @@ public class GameManager : MonoBehaviour
 
     [Header("Starting Values")]
     public int startingChips = 10;
-    public int chipValue = 1;        // base score per chip
+    public int chipValue = 1;  // score per chip unit
 
     [Header("Runtime State (read-only)")]
     public int currentChips;
@@ -14,11 +15,7 @@ public class GameManager : MonoBehaviour
 
     void Awake()
     {
-        if (Instance != null && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
 
@@ -26,10 +23,6 @@ public class GameManager : MonoBehaviour
         currentScore = 0;
     }
 
-    /// <summary>
-    /// Spend one chip to bet.
-    /// Returns false if no chips left.
-    /// </summary>
     public bool SpendChip()
     {
         if (currentChips <= 0) return false;
@@ -37,13 +30,8 @@ public class GameManager : MonoBehaviour
         return true;
     }
 
-    /// <summary>
-    /// Award score for a winning bet.
-    /// payoutMultiplier = how many chips-worth of score you win per chip bet.
-    /// </summary>
-    public void AwardScore(int payoutMultiplier, int betAmount = 1)
+    public void AwardScore(int scoreGain)
     {
-        int scoreGain = payoutMultiplier * betAmount * chipValue;
         currentScore += scoreGain;
     }
 }

@@ -1,7 +1,8 @@
 // UIManager.cs
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using TMPro;
-using System.Collections.Generic;
 
 public class UIManager : MonoBehaviour
 {
@@ -9,36 +10,42 @@ public class UIManager : MonoBehaviour
     public TextMeshProUGUI chipsText;
     public TextMeshProUGUI scoreText;
     public TextMeshProUGUI betsText;
-
-    private GameManager gm;
+    public TextMeshProUGUI resultText;
 
     void Start()
     {
-        gm = GameManager.Instance;
-        UpdateUI();
-        UpdateBetUI(new List<BetZone.BetType>(), new List<int>());
+        UpdateUI( GameManager.Instance.currentChips, GameManager.Instance.currentScore );
+        ClearBetsDisplay();
     }
 
-    public void UpdateUI()
+    public void UpdateUI(int chips, int score)
     {
-        chipsText.text = $"Chips: {gm.currentChips}";
-        scoreText.text = $"Score: {gm.currentScore}";
+        chipsText.text = $"Chips: {chips}";
+        scoreText.text = $"Score: {score}";
     }
 
-    public void UpdateBetUI(List<BetZone.BetType> betTypes, List<int> multipliers)
+    public void UpdateBetUI(List<BetZone.BetType> types, List<int> amounts, List<int> multipliers)
     {
-        if (betTypes == null || betTypes.Count == 0)
+        if (types.Count == 0)
         {
             betsText.text = "No bets placed";
             return;
         }
 
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine("Active Bets:");
-        for (int i = 0; i < betTypes.Count; i++)
-        {
-            sb.AppendLine($"{betTypes[i]} x{multipliers[i]}");
-        }
+        for (int i = 0; i < types.Count; i++)
+            sb.AppendLine($"{types[i]} x{amounts[i]} @payout×{multipliers[i]}");
         betsText.text = sb.ToString();
+    }
+
+    public void DisplayResult(string text)
+    {
+        resultText.text = text;
+    }
+
+    public void ClearBetsDisplay()
+    {
+        betsText.text = "No bets placed";
     }
 }
