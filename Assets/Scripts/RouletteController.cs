@@ -1,9 +1,8 @@
-// RouletteController.cs
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using System.Collections;
 
 public class RouletteController : MonoBehaviour
 {
@@ -11,9 +10,14 @@ public class RouletteController : MonoBehaviour
     {
         public BetZone.BetType type;
         public int payoutMultiplier;
-        public int amount; // chips placed
+        public int amount;
 
-        public Bet(BetZone.BetType t, int p) { type = t; payoutMultiplier = p; amount = 0; }
+        public Bet(BetZone.BetType t, int p)
+        {
+            type = t;
+            payoutMultiplier = p;
+            amount = 0;
+        }
     }
 
     [Header("Refs")]
@@ -26,11 +30,12 @@ public class RouletteController : MonoBehaviour
     private List<Bet> bets = new List<Bet>();
     private System.Random rng = new System.Random();
 
-    void Start()
+    private void Start()
     {
         spinButton.onClick.AddListener(OnSpinPressed);
         ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
         ui.ClearBetsDisplay();
+        spinButtonLabel.text = "Bet & Spin";
     }
 
     public void PlaceBet(BetZone.BetType type, int multiplier)
@@ -41,7 +46,6 @@ public class RouletteController : MonoBehaviour
             return;
         }
 
-        // find or create the Bet entry
         var bet = bets.Find(b => b.type == type && b.payoutMultiplier == multiplier);
         if (bet == null)
         {
@@ -50,7 +54,6 @@ public class RouletteController : MonoBehaviour
         }
         bet.amount++;
 
-        // refresh UI
         ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
         ui.UpdateBetUI(
             bets.ConvertAll(b => b.type),
@@ -59,7 +62,7 @@ public class RouletteController : MonoBehaviour
         );
     }
 
-    void OnSpinPressed()
+    private void OnSpinPressed()
     {
         if (bets.Count == 0)
         {
@@ -78,30 +81,38 @@ public class RouletteController : MonoBehaviour
         StartCoroutine(DelayedShowResult(result, color, oddEven));
     }
 
-    IEnumerator DelayedShowResult(int number, string color, string oddEven)
+    private IEnumerator DelayedShowResult(int number, string color, string oddEven)
     {
         yield return new WaitForSeconds(wheel.spinDuration);
         ShowResult(number, color, oddEven);
     }
 
-    void ShowResult(int number, string color, string oddEven)
+    private void ShowResult(int number, string color, string oddEven)
     {
         int totalScoreGain = 0;
 
+        // Collect loss or win animations per zone
         foreach (var bet in bets)
         {
-            if (EvaluateBet(bet.type, number, color))
+            var zone = FindMatchingZone(bet.type);
+            bool won = EvaluateBet(bet.type, number, color);
+            if (won)
             {
-                int gain = bet.amount * bet.payoutMultiplier * GameManager.Instance.chipValue;
-                totalScoreGain += gain;
+                int extra = bet.amount * (bet.payoutMultiplier - 1);
+                zone.CollectWin(extra);
+                totalScoreGain += bet.amount * bet.payoutMultiplier * GameManager.Instance.chipValue;
             }
+            else
+            {
+                zone.CollectLoss();
+            }
+
+            if (won)
+                GameManager.Instance.AwardScore(bet.amount * bet.payoutMultiplier);
         }
 
-        if (totalScoreGain > 0)
-            GameManager.Instance.AwardScore(totalScoreGain);
-
         string header = $"{number} {color} {oddEven}".Trim();
-        string body = totalScoreGain > 0
+        string body   = totalScoreGain > 0
             ? $"You won {totalScoreGain} score!"
             : "No winning bets.";
 
@@ -112,6 +123,19 @@ public class RouletteController : MonoBehaviour
         ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
         ui.ClearBetsDisplay();
         spinButton.interactable = true;
+    }
+
+     private BetZone FindMatchingZone(BetZone.BetType type)
+    {
+        // Use new API to find all BetZone instances efficiently
+        var allZones = Object.FindObjectsByType<BetZone>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None
+        );
+        foreach (var z in allZones)
+            if (z.betType == type)
+                return z;
+        return null;
     }
 
     private bool EvaluateBet(BetZone.BetType type, int number, string color)

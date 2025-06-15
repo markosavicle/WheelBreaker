@@ -1,5 +1,8 @@
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 public class BetZone : MonoBehaviour
 {
@@ -19,10 +22,20 @@ public class BetZone : MonoBehaviour
     public int payoutMultiplier = 35;
     public GameObject chipPrefab;
 
+    [Header("Slide Settings")]
+    [Tooltip("Duration of the slide animation in seconds")] public float slideDuration = 0.5f;
+    [Tooltip("Distance chips move along the table's forward axis on slide")] public float slideDistance = 1.0f;
+
+    // Directions along the table's forward (z) axis
+    [Tooltip("Direction chips move on a win - towards player (negative Z)")]
+    public Vector3 winDirection = Vector3.back;
+    [Tooltip("Direction chips move on a loss - away from player (positive Z)")]
+    public Vector3 loseDirection = Vector3.forward;
+
     private Button button;
     private float chipHeight;
     private Vector3 basePosition;
-    private int placedCount = 0;
+    private List<GameObject> placedChips = new List<GameObject>();
 
     void Awake()
     {
@@ -30,33 +43,72 @@ public class BetZone : MonoBehaviour
         if (button != null)
             button.onClick.AddListener(OnClick);
 
-        // Determine chip height in prefab's local space
         var meshFilter = chipPrefab.GetComponent<MeshFilter>();
         if (meshFilter != null && meshFilter.sharedMesh != null)
-        {
             chipHeight = meshFilter.sharedMesh.bounds.size.y * chipPrefab.transform.localScale.y;
-        }
         else
-        {
             chipHeight = 0.2f;
-        }
 
-        // Cache the world-space base position
         basePosition = transform.position;
     }
 
     void OnClick()
     {
-        // Place the bet via controller (deduct chip & update UI)
         var controller = FindFirstObjectByType<RouletteController>();
         controller.PlaceBet(betType, payoutMultiplier);
 
-        // Calculate spawn position in world space (stack vertically)
-        Vector3 spawnPos = basePosition + Vector3.up * (chipHeight * placedCount + chipHeight / 2f);
+        Vector3 spawnPos = basePosition + Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
+        GameObject chip = Instantiate(chipPrefab, spawnPos, Quaternion.identity);
+        placedChips.Add(chip);
+    }
 
-        // Instantiate without parenting under this transform to avoid inherited scale
-        Instantiate(chipPrefab, spawnPos, Quaternion.identity);
+    /// <summary>
+    /// Animate and remove chips for a losing bet.
+    /// </summary>
+    public void CollectLoss()
+    {
+        StartCoroutine(AnimateChips(loseDirection));
+    }
 
-        placedCount++;
+    /// <summary>
+    /// Animate, spawn extra, and remove chips for a winning bet.
+    /// </summary>
+    public void CollectWin(int extraCount)
+    {
+        for (int i = 0; i < extraCount; i++)
+        {
+            Vector3 spawnPos = basePosition + Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
+            GameObject chip = Instantiate(chipPrefab, spawnPos, Quaternion.identity);
+            placedChips.Add(chip);
+        }
+        StartCoroutine(AnimateChips(winDirection));
+    }
+
+    private IEnumerator AnimateChips(Vector3 direction)
+    {
+        float elapsed = 0f;
+        Vector3[] startPositions = new Vector3[placedChips.Count];
+        Vector3 moveOffset = direction.normalized * slideDistance;
+        for (int i = 0; i < placedChips.Count; i++)
+            startPositions[i] = placedChips[i].transform.position;
+
+        while (elapsed < slideDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / slideDuration;
+            for (int i = 0; i < placedChips.Count; i++)
+            {
+                placedChips[i].transform.position = Vector3.Lerp(
+                    startPositions[i],
+                    startPositions[i] + moveOffset,
+                    t
+                );
+            }
+            yield return null;
+        }
+
+        foreach (var chip in placedChips)
+            Destroy(chip);
+        placedChips.Clear();
     }
 }
