@@ -28,6 +28,11 @@ public class BetZone : MonoBehaviour,
     public Vector3 winDirection = Vector3.back;
     public Vector3 loseDirection = Vector3.forward;
 
+    [Header("Hold Settings")]
+    public float baseHoldInterval = 0.5f;
+    public float minHoldInterval = 0.05f;
+    public float intervalDecayRate = 0.9f;
+    
     private RouletteController controller;
     private float chipHeight;
     private Vector3 basePosition;
@@ -59,6 +64,7 @@ public class BetZone : MonoBehaviour,
             {
                 holdTimer = 0f;
                 HandleBet();
+                holdInterval = Mathf.Max(minHoldInterval, holdInterval * intervalDecayRate);
             }
         }
     }
@@ -67,6 +73,7 @@ public class BetZone : MonoBehaviour,
     {
         isHolding     = true;
         holdTimer     = 0f;
+        holdInterval  = baseHoldInterval;
         isRightClick  = eventData.button == PointerEventData.InputButton.Right;
         HandleBet();
     }

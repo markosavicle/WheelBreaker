@@ -73,6 +73,8 @@ public class GameManager : MonoBehaviour
     {
         currentLevel++;
         currentScoreGoal += baseScoreGoal;
+        currentScore = 0;
+        currentChips = 10;
 
         if (currentLevel > highestLevelReached)
         {
