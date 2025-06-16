@@ -1,10 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
+using UnityEngine.EventSystems;
 
-public class BetZone : MonoBehaviour
+public class BetZone : MonoBehaviour,
+    IPointerDownHandler, IPointerUpHandler, IPointerEnterHandler, IPointerExitHandler
 {
     public enum BetType
     {
@@ -17,68 +17,113 @@ public class BetZone : MonoBehaviour
         Bet_1_18, Bet_19_36
     }
 
-    [Header("Bet Zone Settings")]
+     [Header("Bet Zone Settings")]
     public BetType betType;
     public int payoutMultiplier = 35;
     public GameObject chipPrefab;
 
     [Header("Slide Settings")]
-    [Tooltip("Duration of the slide animation in seconds")] public float slideDuration = 0.5f;
-    [Tooltip("Distance chips move along the table's forward axis on slide")] public float slideDistance = 1.0f;
-
-    // Directions along the table's forward (z) axis
-    [Tooltip("Direction chips move on a win - towards player (negative Z)")]
+    public float slideDuration = 0.5f;
+    public float slideDistance = 1.0f;
     public Vector3 winDirection = Vector3.back;
-    [Tooltip("Direction chips move on a loss - away from player (positive Z)")]
     public Vector3 loseDirection = Vector3.forward;
 
-    private Button button;
+    private RouletteController controller;
     private float chipHeight;
     private Vector3 basePosition;
     private List<GameObject> placedChips = new List<GameObject>();
 
+    private bool isPointerOver = false;
+    private bool isHolding = false;
+    private float holdTimer = 0f;
+    private float holdInterval = 0.25f;
+    private bool isRightClick = false;
+
     void Awake()
     {
-        button = GetComponent<Button>();
-        if (button != null)
-            button.onClick.AddListener(OnClick);
+        controller   = FindFirstObjectByType<RouletteController>();
 
         var meshFilter = chipPrefab.GetComponent<MeshFilter>();
-        if (meshFilter != null && meshFilter.sharedMesh != null)
-            chipHeight = meshFilter.sharedMesh.bounds.size.y * chipPrefab.transform.localScale.y;
-        else
-            chipHeight = 0.2f;
-
+        chipHeight = (meshFilter != null && meshFilter.sharedMesh != null)
+            ? meshFilter.sharedMesh.bounds.size.y * chipPrefab.transform.localScale.y
+            : 0.2f;
         basePosition = transform.position;
     }
 
-    void OnClick()
+    void Update()
     {
-        var controller = FindFirstObjectByType<RouletteController>();
-        controller.PlaceBet(betType, payoutMultiplier);
-
-        Vector3 spawnPos = basePosition + Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
-        GameObject chip = Instantiate(chipPrefab, spawnPos, Quaternion.identity);
-        placedChips.Add(chip);
+        if (isPointerOver && isHolding)
+        {
+            holdTimer += Time.deltaTime;
+            if (holdTimer >= holdInterval)
+            {
+                holdTimer = 0f;
+                HandleBet();
+            }
+        }
     }
 
-    /// <summary>
-    /// Animate and remove chips for a losing bet.
-    /// </summary>
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        isHolding     = true;
+        holdTimer     = 0f;
+        isRightClick  = eventData.button == PointerEventData.InputButton.Right;
+        HandleBet();
+    }
+
+    public void OnPointerUp(PointerEventData eventData)
+    {
+        isHolding = false;
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        isPointerOver = true;
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        isPointerOver = false;
+        isHolding     = false;
+    }
+
+    private void HandleBet()
+    {
+        if (isRightClick)
+        {
+            // remove chip
+            if (placedChips.Count > 0)
+            {
+                Destroy(placedChips[placedChips.Count - 1]);
+                placedChips.RemoveAt(placedChips.Count - 1);
+                controller.RemoveBet(betType, payoutMultiplier);
+            }
+        }
+        else
+        {
+            // place chip if possible
+            if (controller.PlaceBet(betType, payoutMultiplier))
+            {
+                Vector3 spawnPos = basePosition +
+                    Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
+                var chip = Instantiate(chipPrefab, spawnPos, Quaternion.identity);
+                placedChips.Add(chip);
+            }
+        }
+    }
+
     public void CollectLoss()
     {
         StartCoroutine(AnimateChips(loseDirection));
     }
 
-    /// <summary>
-    /// Animate, spawn extra, and remove chips for a winning bet.
-    /// </summary>
     public void CollectWin(int extraCount)
     {
         for (int i = 0; i < extraCount; i++)
         {
-            Vector3 spawnPos = basePosition + Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
-            GameObject chip = Instantiate(chipPrefab, spawnPos, Quaternion.identity);
+            Vector3 spawnPos = basePosition +
+                Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
+            var chip = Instantiate(chipPrefab, spawnPos, Quaternion.identity);
             placedChips.Add(chip);
         }
         StartCoroutine(AnimateChips(winDirection));
@@ -87,28 +132,23 @@ public class BetZone : MonoBehaviour
     private IEnumerator AnimateChips(Vector3 direction)
     {
         float elapsed = 0f;
-        Vector3[] startPositions = new Vector3[placedChips.Count];
-        Vector3 moveOffset = direction.normalized * slideDistance;
+        Vector3[] starts = new Vector3[placedChips.Count];
+        Vector3 offset = direction.normalized * slideDistance;
         for (int i = 0; i < placedChips.Count; i++)
-            startPositions[i] = placedChips[i].transform.position;
+            starts[i] = placedChips[i].transform.position;
 
         while (elapsed < slideDuration)
         {
             elapsed += Time.deltaTime;
             float t = elapsed / slideDuration;
             for (int i = 0; i < placedChips.Count; i++)
-            {
-                placedChips[i].transform.position = Vector3.Lerp(
-                    startPositions[i],
-                    startPositions[i] + moveOffset,
-                    t
-                );
-            }
+                placedChips[i].transform.position =
+                    Vector3.Lerp(starts[i], starts[i] + offset, t);
             yield return null;
         }
 
-        foreach (var chip in placedChips)
-            Destroy(chip);
+        foreach (var c in placedChips)
+            Destroy(c);
         placedChips.Clear();
     }
 }

@@ -1,7 +1,7 @@
-// UIManager.cs
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
+using UnityEngine.UI;
 using TMPro;
 
 public class UIManager : MonoBehaviour
@@ -12,9 +12,28 @@ public class UIManager : MonoBehaviour
     public TextMeshProUGUI betsText;
     public TextMeshProUGUI resultText;
 
+    [Header("Level UI")]
+    public TextMeshProUGUI levelText;
+    public TextMeshProUGUI goalText;
+
+    [Header("Game Over UI")]
+    public GameObject gameOverPanel;
+    [Tooltip("Large title text (e.g. 200pt)")]
+    public TextMeshProUGUI gameOverMessage;
+    [Tooltip("Details text (e.g. 50pt)")]
+    public TextMeshProUGUI gameOverDetails;
+    public Button resetButton;
+
     void Start()
     {
-        UpdateUI( GameManager.Instance.currentChips, GameManager.Instance.currentScore );
+        resetButton.onClick.AddListener(OnResetClicked);
+
+        gameOverPanel.SetActive(false);
+        UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
+        UpdateLevelUI(
+            GameManager.Instance.currentLevel,
+            GameManager.Instance.currentScoreGoal
+        );
         ClearBetsDisplay();
     }
 
@@ -35,7 +54,7 @@ public class UIManager : MonoBehaviour
         var sb = new StringBuilder();
         sb.AppendLine("Active Bets:");
         for (int i = 0; i < types.Count; i++)
-            sb.AppendLine($"{types[i]} x{amounts[i]} @payout×{multipliers[i]}");
+            sb.AppendLine($"{types[i]} x{amounts[i]} @×{multipliers[i]}");
         betsText.text = sb.ToString();
     }
 
@@ -47,5 +66,37 @@ public class UIManager : MonoBehaviour
     public void ClearBetsDisplay()
     {
         betsText.text = "No bets placed";
+    }
+
+    public void UpdateLevelUI(int level, int goal)
+    {
+        levelText.text = $"Level: {level}";
+        goalText.text = $"Goal: {goal}";
+    }
+
+    /// <summary>
+    /// Show the Game Over panel with a big title and smaller details.
+    /// </summary>
+    public void ShowGameOver(int finalScore, int level, int record)
+    {
+        gameOverPanel.SetActive(true);
+
+        gameOverMessage.text = "Game Over";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Score: {finalScore}");
+        sb.AppendLine($"Level: {level}");
+        sb.AppendLine($"Best: {record}");
+        if (level > record)
+            sb.AppendLine("NEW RECORD!");
+        gameOverDetails.text = sb.ToString();
+    }
+
+    private void OnResetClicked()
+    {
+        GameManager.Instance.ResetGame();
+        UnityEngine.SceneManagement.SceneManager.LoadScene(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex
+        );
     }
 }

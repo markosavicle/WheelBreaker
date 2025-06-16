@@ -11,39 +11,33 @@ public class RouletteController : MonoBehaviour
         public BetZone.BetType type;
         public int payoutMultiplier;
         public int amount;
-
-        public Bet(BetZone.BetType t, int p)
-        {
-            type = t;
-            payoutMultiplier = p;
-            amount = 0;
-        }
+        public Bet(BetZone.BetType t, int p) { type = t; payoutMultiplier = p; amount = 0; }
     }
 
     [Header("Refs")]
     public Button spinButton;
     public TextMeshProUGUI spinButtonLabel;
-    public TextMeshProUGUI resultText;
     public WheelSpinner wheel;
     public UIManager ui;
 
     private List<Bet> bets = new List<Bet>();
     private System.Random rng = new System.Random();
 
-    private void Start()
+    void Start()
     {
         spinButton.onClick.AddListener(OnSpinPressed);
-        ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
-        ui.ClearBetsDisplay();
-        spinButtonLabel.text = "Bet & Spin";
+        RefreshUI();
     }
 
-    public void PlaceBet(BetZone.BetType type, int multiplier)
+    /// <summary>
+    /// Attempt to place one chip on this bet. Returns false if no chip was spent.
+    /// </summary>
+    public bool PlaceBet(BetZone.BetType type, int multiplier)
     {
         if (!GameManager.Instance.SpendChip())
         {
             ui.DisplayResult("No chips left!");
-            return;
+            return false;
         }
 
         var bet = bets.Find(b => b.type == type && b.payoutMultiplier == multiplier);
@@ -53,13 +47,26 @@ public class RouletteController : MonoBehaviour
             bets.Add(bet);
         }
         bet.amount++;
+        RefreshUI();
+        return true;
+    }
 
-        ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
-        ui.UpdateBetUI(
-            bets.ConvertAll(b => b.type),
-            bets.ConvertAll(b => b.amount),
-            bets.ConvertAll(b => b.payoutMultiplier)
-        );
+    /// <summary>
+    /// Remove one chip from this bet and refund it.
+    /// </summary>
+    public void RemoveBet(BetZone.BetType type, int multiplier)
+    {
+        var bet = bets.Find(b => b.type == type && b.payoutMultiplier == multiplier);
+        if (bet == null || bet.amount == 0) return;
+
+        bet.amount--;
+        GameManager.Instance.RefundChip();
+
+        // Remove empty bet entries
+        if (bet.amount == 0)
+            bets.Remove(bet);
+
+        RefreshUI();
     }
 
     private void OnSpinPressed()
@@ -71,9 +78,9 @@ public class RouletteController : MonoBehaviour
         }
 
         spinButton.interactable = false;
-        resultText.text = "Spinning…";
+        ui.DisplayResult("Spinning…");
 
-        int result = rng.Next(0, 37);
+        int result   = rng.Next(0, 37);
         string color = GetColor(result);
         string oddEven = result == 0 ? "Zero" : (result % 2 == 0 ? "Even" : "Odd");
 
@@ -91,46 +98,68 @@ public class RouletteController : MonoBehaviour
     {
         int totalScoreGain = 0;
 
-        // Collect loss or win animations per zone
+        // Animate all bet zones
         foreach (var bet in bets)
         {
             var zone = FindMatchingZone(bet.type);
             bool won = EvaluateBet(bet.type, number, color);
+
             if (won)
             {
                 int extra = bet.amount * (bet.payoutMultiplier - 1);
                 zone.CollectWin(extra);
-                totalScoreGain += bet.amount * bet.payoutMultiplier * GameManager.Instance.chipValue;
+
+                int gain = bet.amount * bet.payoutMultiplier * GameManager.Instance.chipValue;
+                totalScoreGain += gain;
+                GameManager.Instance.AwardScore(gain);
             }
             else
             {
                 zone.CollectLoss();
             }
-
-            if (won)
-                GameManager.Instance.AwardScore(bet.amount * bet.payoutMultiplier);
         }
 
-        string header = $"{number} {color} {oddEven}".Trim();
-        string body   = totalScoreGain > 0
-            ? $"You won {totalScoreGain} score!"
-            : "No winning bets.";
+        ui.DisplayResult($"{number} {color} {oddEven}\n" +
+                         (totalScoreGain > 0
+                           ? $"You won {totalScoreGain} score!"
+                           : "No winning bets."));
 
-        ui.DisplayResult($"{header}\n{body}");
-
-        // clear bets
         bets.Clear();
-        ui.UpdateUI(GameManager.Instance.currentChips, GameManager.Instance.currentScore);
-        ui.ClearBetsDisplay();
         spinButton.interactable = true;
+        RefreshUI();
+
+        // Only show Game Over after spin if we have no chips left
+        if (GameManager.Instance.currentChips <= 0)
+        {
+            ui.ShowGameOver(
+                GameManager.Instance.currentScore,
+                GameManager.Instance.currentLevel,
+                GameManager.Instance.highestLevelReached
+            );
+        }
     }
 
-     private BetZone FindMatchingZone(BetZone.BetType type)
+    private void RefreshUI()
     {
-        // Use new API to find all BetZone instances efficiently
+        ui.UpdateUI(
+            GameManager.Instance.currentChips,
+            GameManager.Instance.currentScore
+        );
+        ui.UpdateLevelUI(
+            GameManager.Instance.currentLevel,
+            GameManager.Instance.currentScoreGoal
+        );
+        ui.UpdateBetUI(
+            bets.ConvertAll(b => b.type),
+            bets.ConvertAll(b => b.amount),
+            bets.ConvertAll(b => b.payoutMultiplier)
+        );
+    }
+
+    private BetZone FindMatchingZone(BetZone.BetType type)
+    {
         var allZones = Object.FindObjectsByType<BetZone>(
-            FindObjectsInactive.Include,
-            FindObjectsSortMode.None
+            FindObjectsInactive.Include, FindObjectsSortMode.None
         );
         foreach (var z in allZones)
             if (z.betType == type)
