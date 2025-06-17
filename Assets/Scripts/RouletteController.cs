@@ -3,15 +3,16 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Linq;  // for SequenceEqual or Contains
 
 public class RouletteController : MonoBehaviour
 {
     private class Bet
     {
-        public BetZone.BetType type;
+        public int[] numbers;
         public int payoutMultiplier;
         public int amount;
-        public Bet(BetZone.BetType t, int p) { type = t; payoutMultiplier = p; amount = 0; }
+        public Bet(int[] nums, int mult) { numbers = nums; payoutMultiplier = mult; amount = 0; }
     }
 
     [Header("Refs")]
@@ -29,10 +30,8 @@ public class RouletteController : MonoBehaviour
         RefreshUI();
     }
 
-    /// <summary>
-    /// Attempt to place one chip on this bet. Returns false if no chip was spent.
-    /// </summary>
-    public bool PlaceBet(BetZone.BetType type, int multiplier)
+    /// <summary>Place one chip on a set of pockets. Returns false if no chips left.</summary>
+    public bool PlaceBet(int[] numbers, int multiplier)
     {
         if (!GameManager.Instance.SpendChip())
         {
@@ -40,10 +39,10 @@ public class RouletteController : MonoBehaviour
             return false;
         }
 
-        var bet = bets.Find(b => b.type == type && b.payoutMultiplier == multiplier);
+        var bet = bets.FirstOrDefault(b => b.numbers.SequenceEqual(numbers) && b.payoutMultiplier == multiplier);
         if (bet == null)
         {
-            bet = new Bet(type, multiplier);
+            bet = new Bet(numbers, multiplier);
             bets.Add(bet);
         }
         bet.amount++;
@@ -51,18 +50,15 @@ public class RouletteController : MonoBehaviour
         return true;
     }
 
-    /// <summary>
-    /// Remove one chip from this bet and refund it.
-    /// </summary>
-    public void RemoveBet(BetZone.BetType type, int multiplier)
+    /// <summary>Remove one chip from a set of pockets and refund it.</summary>
+    public void RemoveBet(int[] numbers)
     {
-        var bet = bets.Find(b => b.type == type && b.payoutMultiplier == multiplier);
+        var bet = bets.FirstOrDefault(b => b.numbers.SequenceEqual(numbers));
         if (bet == null || bet.amount == 0) return;
 
         bet.amount--;
         GameManager.Instance.RefundChip();
 
-        // Remove empty bet entries
         if (bet.amount == 0)
             bets.Remove(bet);
 
@@ -80,15 +76,15 @@ public class RouletteController : MonoBehaviour
         spinButton.interactable = false;
         ui.DisplayResult("Spinning…");
 
-        int result   = rng.Next(0, 37);
-        string color = GetColor(result);
-        string oddEven = result == 0 ? "Zero" : (result % 2 == 0 ? "Even" : "Odd");
+        int result    = rng.Next(0, 37);
+        string color  = GetColor(result);
+        string oddEven = (result == 0 ? "Zero" : (result % 2 == 0 ? "Even" : "Odd"));
 
         wheel.SpinToSlot(result);
-        StartCoroutine(DelayedShowResult(result, color, oddEven));
+        StartCoroutine(ShowResultDelayed(result, color, oddEven));
     }
 
-    private IEnumerator DelayedShowResult(int number, string color, string oddEven)
+    private IEnumerator ShowResultDelayed(int number, string color, string oddEven)
     {
         yield return new WaitForSeconds(wheel.spinDuration);
         ShowResult(number, color, oddEven);
@@ -98,12 +94,11 @@ public class RouletteController : MonoBehaviour
     {
         int totalScoreGain = 0;
 
-        // Animate all bet zones
+        // Animate and calculate payouts
         foreach (var bet in bets)
         {
-            var zone = FindMatchingZone(bet.type);
-            bool won = EvaluateBet(bet.type, number, color);
-
+            bool won = bet.numbers.Contains(number);
+            var zone = FindMatchingZone(bet.numbers);
             if (won)
             {
                 int extra = bet.amount * (bet.payoutMultiplier - 1);
@@ -120,23 +115,18 @@ public class RouletteController : MonoBehaviour
         }
 
         ui.DisplayResult($"{number} {color} {oddEven}\n" +
-                         (totalScoreGain > 0
-                           ? $"You won {totalScoreGain} score!"
-                           : "No winning bets."));
+            (totalScoreGain > 0 ? $"You won {totalScoreGain} score!" : "No winning bets."));
 
         bets.Clear();
         spinButton.interactable = true;
         RefreshUI();
 
-        // Only show Game Over after spin if we have no chips left
         if (GameManager.Instance.currentChips <= 0)
-        {
             ui.ShowGameOver(
                 GameManager.Instance.currentScore,
                 GameManager.Instance.currentLevel,
                 GameManager.Instance.highestLevelReached
             );
-        }
     }
 
     private void RefreshUI()
@@ -149,50 +139,27 @@ public class RouletteController : MonoBehaviour
             GameManager.Instance.currentLevel,
             GameManager.Instance.currentScoreGoal
         );
-        ui.UpdateBetUI(
-            bets.ConvertAll(b => b.type),
-            bets.ConvertAll(b => b.amount),
-            bets.ConvertAll(b => b.payoutMultiplier)
-        );
+
+        // Convert each bet’s numbers to a label like "1,2,3,4"
+        var labels = bets.Select(b => string.Join(",", b.numbers)).ToList();
+        var amounts = bets.Select(b => b.amount).ToList();
+        var mults   = bets.Select(b => b.payoutMultiplier).ToList();
+
+        ui.UpdateBetUI(labels, amounts, mults);
     }
 
-    private BetZone FindMatchingZone(BetZone.BetType type)
+    private BetZone FindMatchingZone(int[] numbers)
     {
         var allZones = Object.FindObjectsByType<BetZone>(
             FindObjectsInactive.Include, FindObjectsSortMode.None
         );
-        foreach (var z in allZones)
-            if (z.betType == type)
-                return z;
-        return null;
-    }
-
-    private bool EvaluateBet(BetZone.BetType type, int number, string color)
-    {
-        int val = (int)type;
-        if (val >= 0 && val <= 36) return val == number;
-        switch (type)
-        {
-            case BetZone.BetType.Bet_Red:   return color == "Red";
-            case BetZone.BetType.Bet_Black: return color == "Black";
-            case BetZone.BetType.Bet_Even:  return number != 0 && number % 2 == 0;
-            case BetZone.BetType.Bet_Odd:   return number % 2 == 1;
-            case BetZone.BetType.Bet_1st12: return number >= 1 && number <= 12;
-            case BetZone.BetType.Bet_2st12: return number >= 13 && number <= 24;
-            case BetZone.BetType.Bet_3st12: return number >= 25 && number <= 36;
-            case BetZone.BetType.Bet_1_34:  return (number - 1) % 3 == 0;
-            case BetZone.BetType.Bet_2_35:  return (number - 2) % 3 == 0;
-            case BetZone.BetType.Bet_3_36:  return (number - 3) % 3 == 0;
-            case BetZone.BetType.Bet_1_18:  return number >= 1 && number <= 18;
-            case BetZone.BetType.Bet_19_36: return number >= 19 && number <= 36;
-            default: return false;
-        }
+        return allZones.First(z => z.coveredNumbers.SequenceEqual(numbers));
     }
 
     private string GetColor(int number)
     {
         if (number == 0) return "Green";
         int[] reds = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36};
-        return System.Array.IndexOf(reds, number) >= 0 ? "Red" : "Black";
+        return (System.Array.IndexOf(reds, number) >= 0) ? "Red" : "Black";
     }
 }

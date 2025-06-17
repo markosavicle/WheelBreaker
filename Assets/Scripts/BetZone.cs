@@ -6,19 +6,10 @@ using UnityEngine.EventSystems;
 public class BetZone : MonoBehaviour,
     IPointerDownHandler, IPointerUpHandler, IPointerEnterHandler, IPointerExitHandler
 {
-    public enum BetType
-    {
-        Bet_0 = 0, Bet_1 = 1, Bet_2 = 2, Bet_3 = 3, Bet_4 = 4, Bet_5 = 5, Bet_6 = 6, Bet_7 = 7, Bet_8 = 8,
-        Bet_9 = 9, Bet_10 = 10, Bet_11 = 11, Bet_12 = 12, Bet_13 = 13, Bet_14 = 14, Bet_15 = 15, Bet_16 = 16,
-        Bet_17 = 17, Bet_18 = 18, Bet_19 = 19, Bet_20 = 20, Bet_21 = 21, Bet_22 = 22, Bet_23 = 23, Bet_24 = 24,
-        Bet_25 = 25, Bet_26 = 26, Bet_27 = 27, Bet_28 = 28, Bet_29 = 29, Bet_30 = 30, Bet_31 = 31, Bet_32 = 32,
-        Bet_33 = 33, Bet_34 = 34, Bet_35 = 35, Bet_36 = 36, Bet_Red, Bet_Black, Bet_Even,
-        Bet_Odd, Bet_1st12, Bet_2st12, Bet_3st12, Bet_1_34, Bet_2_35, Bet_3_36,
-        Bet_1_18, Bet_19_36
-    }
-
-     [Header("Bet Zone Settings")]
-    public BetType betType;
+    [Header("Bet Zone Settings")]
+    [Tooltip("The pockets this zone covers (e.g. {1,2,3,4} for a line, {1,2,4,5} for a corner, or {5} for a single)")]
+    public int[] coveredNumbers;
+    [Tooltip("Payout multiplier for this zone (e.g. 35 for single, 5 for line, 8 for corner)")]
     public int payoutMultiplier = 35;
     public GameObject chipPrefab;
 
@@ -28,11 +19,6 @@ public class BetZone : MonoBehaviour,
     public Vector3 winDirection = Vector3.back;
     public Vector3 loseDirection = Vector3.forward;
 
-    [Header("Hold Settings")]
-    public float baseHoldInterval = 0.5f;
-    public float minHoldInterval = 0.05f;
-    public float intervalDecayRate = 0.9f;
-    
     private RouletteController controller;
     private float chipHeight;
     private Vector3 basePosition;
@@ -46,12 +32,14 @@ public class BetZone : MonoBehaviour,
 
     void Awake()
     {
-        controller   = FindFirstObjectByType<RouletteController>();
+        controller = FindFirstObjectByType<RouletteController>();
 
+        // compute chip height for stacking
         var meshFilter = chipPrefab.GetComponent<MeshFilter>();
         chipHeight = (meshFilter != null && meshFilter.sharedMesh != null)
             ? meshFilter.sharedMesh.bounds.size.y * chipPrefab.transform.localScale.y
             : 0.2f;
+
         basePosition = transform.position;
     }
 
@@ -64,17 +52,16 @@ public class BetZone : MonoBehaviour,
             {
                 holdTimer = 0f;
                 HandleBet();
-                holdInterval = Mathf.Max(minHoldInterval, holdInterval * intervalDecayRate);
+                // you can tweak holdInterval here if you want acceleration
             }
         }
     }
 
     public void OnPointerDown(PointerEventData eventData)
     {
-        isHolding     = true;
-        holdTimer     = 0f;
-        holdInterval  = baseHoldInterval;
-        isRightClick  = eventData.button == PointerEventData.InputButton.Right;
+        isHolding    = true;
+        holdTimer    = 0f;
+        isRightClick = eventData.button == PointerEventData.InputButton.Right;
         HandleBet();
     }
 
@@ -98,18 +85,18 @@ public class BetZone : MonoBehaviour,
     {
         if (isRightClick)
         {
-            // remove chip
+            // Remove a chip from this zone
             if (placedChips.Count > 0)
             {
                 Destroy(placedChips[placedChips.Count - 1]);
                 placedChips.RemoveAt(placedChips.Count - 1);
-                controller.RemoveBet(betType, payoutMultiplier);
+                controller.RemoveBet(coveredNumbers);
             }
         }
         else
         {
-            // place chip if possible
-            if (controller.PlaceBet(betType, payoutMultiplier))
+            // Place a chip if you have chips left
+            if (controller.PlaceBet(coveredNumbers, payoutMultiplier))
             {
                 Vector3 spawnPos = basePosition +
                     Vector3.up * (chipHeight * placedChips.Count + chipHeight / 2f);
@@ -154,8 +141,7 @@ public class BetZone : MonoBehaviour,
             yield return null;
         }
 
-        foreach (var c in placedChips)
-            Destroy(c);
+        foreach (var c in placedChips) Destroy(c);
         placedChips.Clear();
     }
 }

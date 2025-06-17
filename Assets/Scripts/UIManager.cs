@@ -43,20 +43,20 @@ public class UIManager : MonoBehaviour
         scoreText.text = $"Score: {score}";
     }
 
-    public void UpdateBetUI(List<BetZone.BetType> types, List<int> amounts, List<int> multipliers)
+    public void UpdateBetUI(List<string> betLabels, List<int> amounts, List<int> multipliers)
+{
+    if (betLabels == null || betLabels.Count == 0)
     {
-        if (types.Count == 0)
-        {
-            betsText.text = "No bets placed";
-            return;
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("Active Bets:");
-        for (int i = 0; i < types.Count; i++)
-            sb.AppendLine($"{types[i]} x{amounts[i]} @×{multipliers[i]}");
-        betsText.text = sb.ToString();
+        betsText.text = "No bets placed";
+        return;
     }
+
+    var sb = new StringBuilder();
+    sb.AppendLine("Active Bets:");
+    for (int i = 0; i < betLabels.Count; i++)
+        sb.AppendLine($"{betLabels[i]} x{amounts[i]} @×{multipliers[i]}");
+    betsText.text = sb.ToString();
+}
 
     public void DisplayResult(string text)
     {
