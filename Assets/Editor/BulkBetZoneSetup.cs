@@ -3,10 +3,10 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 public static class BulkBetZoneSetup
 {
-    // Define all special bets here:
     private static readonly Dictionary<string, (int[] numbers, int multiplier)> SpecialBets =
         new Dictionary<string, (int[], int)>()
     {
@@ -17,18 +17,19 @@ public static class BulkBetZoneSetup
         { "1st12",  (Enumerable.Range(1,12).ToArray(), 3) },
         { "2st12",  (Enumerable.Range(13,12).ToArray(), 3) },
         { "3st12",  (Enumerable.Range(25,12).ToArray(), 3) },
-        { "1_34",   (Enumerable.Range(1,36).Where(n => n!=0 && (n-1)%3==0).ToArray(), 3) },
-        { "2_35",   (Enumerable.Range(1,36).Where(n => n!=0 && (n-2)%3==0).ToArray(), 3) },
-        { "3_36",   (Enumerable.Range(1,36).Where(n => n!=0 && (n-3)%3==0).ToArray(), 3) },
+        { "1_34",   (Enumerable.Range(1,36).Where(n => (n - 1) % 3 == 0).ToArray(), 3) },
+        { "2_35",   (Enumerable.Range(1,36).Where(n => (n - 2) % 3 == 0).ToArray(), 3) },
+        { "3_36",   (Enumerable.Range(1,36).Where(n => (n - 3) % 3 == 0).ToArray(), 3) },
         { "1_18",   (Enumerable.Range(1,18).ToArray(), 2) },
         { "19_36",  (Enumerable.Range(19,18).ToArray(), 2) },
-        { "0",      (new[]{0}, 35) }  // zero
+        { "0",      (new[]{0}, 35) }
     };
 
     [MenuItem("Tools/Setup BetZones on Buttons")]
     public static void SetupBetZones()
     {
         int added = 0, updated = 0, skipped = 0, failed = 0;
+
         var buttons = Object.FindObjectsByType<Button>(
             FindObjectsInactive.Include,
             FindObjectsSortMode.None
@@ -43,31 +44,101 @@ public static class BulkBetZoneSetup
                 continue;
             }
 
-            string key = name.Substring(4); // e.g. "Odd" or "1_2_3" or "1st12"
-            int[] betNumbers;
-            int multiplier;
+            string key = name.Substring(4); // Remove "Bet_"
+            int[] betNumbers = null;
+            int multiplier = 1;
 
+            // Check if it's a special named bet
             if (SpecialBets.TryGetValue(key, out var spec))
             {
-                betNumbers  = spec.numbers;
-                multiplier  = spec.multiplier;
+                betNumbers = spec.numbers;
+                multiplier = spec.multiplier;
             }
             else
             {
-                // fallback to numeric parse
-                string[] tokens = key.Split('_');
-                bool ok = tokens.All(t => int.TryParse(t, out _));
-                if (!ok)
+                Match match = Regex.Match(key, @"^(Edge|Corner_Line|Line|Corner)_(\d+)$");
+                if (match.Success)
                 {
-                    Debug.LogWarning($"[Setup Failed] '{name}' is not a recognized bet pattern.");
-                    failed++;
-                    continue;
+                    string type = match.Groups[1].Value;
+                    int index   = int.Parse(match.Groups[2].Value);
+
+                    switch (type)
+                    {
+                        case "Edge":
+                            
+                            int a = index;
+                            int b = index - 3;
+                            if (b < 0) { b = 0; }
+                            betNumbers = new[] { b, a };
+                            multiplier = 17;
+                            break;
+
+                        case "Corner_Line":
+                            if (index == 1)
+                                betNumbers = new[] { 0, 1, 2, 3 };
+                            else
+                            {
+                                int start = 1 + (index - 2) * 3;
+                                betNumbers = Enumerable.Range(start, 6).ToArray();
+                            }
+                            multiplier = 5;
+                            break;
+
+                        case "Line":
+                            int startLine = 1 + (index - 1) * 3;
+                            betNumbers = new[] { startLine, startLine + 1, startLine + 2 };
+                            multiplier = 11;
+                            break;
+
+                        case "Corner":
+                        if (index == 1)
+                        {
+                            betNumbers = new[] { 0, 1, 2 };
+                            multiplier = 11;
+                        }
+                        else if (index == 2)
+                        {
+                            betNumbers = new[] { 0, 2, 3 };
+                            multiplier = 11;
+                        }
+                        else
+                        {
+                            // Corner_3 is 1,2,4,5; Corner_4 is 2,3,5,6; Corner_5 is 4,5,7,8; ...
+                            int baseNum = 1;
+                            for (int i = 3; i < index; i++)
+                                baseNum += (i % 2 == 1) ? 1 : 2;
+
+                            betNumbers = new[] { baseNum, baseNum + 1, baseNum + 3, baseNum + 4 };
+                            multiplier = 8;
+                        }
+                        break;
+                    }
                 }
-                betNumbers = tokens.Select(t => int.Parse(t)).ToArray();
-                multiplier = DefaultMultiplierFor(betNumbers.Length);
+                else
+                {
+                    // Fallback: attempt to parse pure number list
+                    string[] parts = key.Split('_');
+                    bool ok = parts.All(p => int.TryParse(p, out _));
+                    if (!ok)
+                    {
+                        Debug.LogWarning($"[Setup Failed] '{name}' is not a recognized bet format.");
+                        failed++;
+                        continue;
+                    }
+
+                    betNumbers = parts.Select(int.Parse).ToArray();
+                    multiplier = DefaultMultiplierFor(betNumbers.Length);
+                }
             }
 
-            // Add or get existing BetZone
+            if (betNumbers == null)
+            {
+                Debug.LogWarning($"[Null Bet] Failed to resolve numbers for {name}");
+                failed++;
+                continue;
+            }
+
+            // Add or update BetZone component
             var bz = btn.GetComponent<BetZone>();
             if (bz == null)
             {
@@ -77,8 +148,7 @@ public static class BulkBetZoneSetup
             }
             else updated++;
 
-            // Assign fields
-            bz.coveredNumbers   = betNumbers;
+            bz.coveredNumbers = betNumbers;
             bz.payoutMultiplier = multiplier;
         }
 
@@ -91,6 +161,7 @@ public static class BulkBetZoneSetup
         {
             1  => 35,
             2  => 17,
+            3  => 11,
             4  => 8,
             6  => 5,
             12 => 3,
